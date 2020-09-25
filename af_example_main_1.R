@@ -2,14 +2,15 @@
 # Advanced Markov models lecture
 # Script conduct cost-effectiveness analysis of atrial fibrillation using example Markov model
 
-library("remotes")
-library("fs")
-
-my_lib <- path_home_r("R/win-library/my-cran-versions/")
+# library("remotes")
+# library("fs")
+# 
+# my_lib <- path_home_r("R/win-library/my-cran-versions/")
 
 # detach("package:BCEA", unload = TRUE)
 # Load BCEA library to help analyse and visualise results
-library("BCEA", lib.loc = my_lib)
+# library("BCEA", lib.loc = my_lib)
+library("BCEA")
 
 
 # Load the necessary modules
@@ -18,7 +19,7 @@ source("generate_hazards_1.R")
 source("generate_transition_matrix_2.R")
 source("generate_state_utilities_2.R")
 source("generate_state_costs_2.R")
-source("generate_model_outputs_1.r")
+source("generate_model_outputs_1.R")
 
 # Define global simulation parameters
 n_samples <- 1000
