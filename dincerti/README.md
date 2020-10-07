@@ -1,0 +1,1 @@
+This repository includes slides and materials for a talk titled "Multistate Semi-Markov Modeling in R" presented at the 2020 [R for Health Technology Assessment (HTA) showcase](https://r-hta.org/events/workshop/2020/). 
