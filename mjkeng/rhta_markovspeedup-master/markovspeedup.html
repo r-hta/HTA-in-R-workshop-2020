@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Optimizing your code in R</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Mi Jun Keng mijun.keng@ndph.ox.ac.uk" />
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link href="libs/remark-css/default-fonts.css" rel="stylesheet" />
+    <link rel="stylesheet" href="custom.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, title-slide
+
+# Optimizing your code in R
+### Mi Jun Keng <a href="mailto:mijun.keng@ndph.ox.ac.uk" class="email">mijun.keng@ndph.ox.ac.uk</a>
+### Health Economics Research Centre (HERC), University of Oxford
+### 9th October 2020
+
+---
+
+
+
+
+
+
+# Why optimise? 
+
+Many stochastic elements in health economics analysis such as bootstrapping, probabilistic sensitivity analyses, Monte-Carlo simulations etc. 
+
+- Repetitive / messy code
+- Time consuming to run
+- Memory issues
+
+--
+
+Optimising your code may resolve these problems. Also makes it easier to correct error, and makes your code neater and more readable. 
+
+
+---
+
+Consider a dummy example where we want to estimate the average cost and standard error around this cost of treatment from a sample of 100 patients. 
+
+
+```r
+## Create dummy dataset
+n_sample &lt;- 100
+
+df &lt;- data.frame(id = c(1:n_sample), 
+                 cost = rnorm(n_sample, 50, 3))
+```
+
+
+&lt;table style='width:50%;'&gt;
+&lt;caption&gt;First 5 patients in dummy dataset&lt;/caption&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:right;"&gt; id &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; cost &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:right;"&gt; 1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 51.91813 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:right;"&gt; 2 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 47.79129 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:right;"&gt; 3 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 48.42329 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:right;"&gt; 4 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 46.14935 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:right;"&gt; 5 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 49.62297 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+
+
+---
+
+To obtain the standard error, we perform bootstrapping with 500 re-samples. 
+
+
+```r
+## Create empty vector to store mean cost in each bootstrap sample
+boot_mean &lt;- numeric()
+
+## Sample without replacement and calculate mean for each bootstrap sample 
+boot_mean[1] &lt;- mean(sample(df$cost, n_sample, replace = FALSE)) 
+boot_mean[2] &lt;- mean(sample(df$cost, n_sample, replace = FALSE)) 
+... 
+## Keep repeating this code 500 times
+...
+boot_mean[500] &lt;- mean(sample(df$cost, n_sample, replace = FALSE)) 
+```
+
+
+--
+&lt;br /&gt;
+&lt;center&gt; But wait... &lt;/center&gt;
+--
+&lt;br /&gt;
+&lt;center&gt; After all that copying-and-pasting... &lt;/center&gt;
+--
+&lt;br /&gt;
+&lt;center&gt; You now realized you should have sampled with replacement! &lt;/center&gt;
+
+---
+class: middle
+
+
+&lt;center&gt;&lt;img src="https://media.giphy.com/media/NQRRqqkImJ3Da/giphy.gif" height="400"&gt;&lt;/center&gt;
+
+
+---
+
+# Using functions and loops
+
+Wrapping the task you want to run repetitively in a function
+
+
+```r
+calculate_boot_mean &lt;- function(data, n, replacement){
+  mean(sample(data, n, replace = replacement)) 
+}
+```
+
+Using a `for` loop to perform task iteratively
+
+
+```r
+boot_mean &lt;- numeric()
+
+for(i in c(1:500)){
+  boot_mean[i] &lt;- calculate_boot_mean(
+    data = df$cost, n = n_sample, replacement = TRUE)
+}
+```
+
+--
+
+✓ Easier to debug and correct error
+
+--
+
+__? What is R actually doing in each iteration of the `for` loop?__
+
+---
+
+## `for` loops 
+
+
+```r
+boot_mean &lt;- numeric()
+
+for(i in c(1:500)){
+  boot_mean[i] &lt;- calculate_boot_mean(
+    data = df$cost, n = n_sample, replacement = TRUE)
+}
+```
+
+- Re-sizing vector `boot_mean` and re-allocating memory for it
+- Temporary variable `i` created and gets updated in the global environment 
+
+&lt;!-- For more complex code, you may have several temporary variables being created within the loop --&gt;
+
+--
+
+
+```r
+*boot_mean &lt;- numeric(500)
+
+for(i in c(1:500)){
+  boot_mean[i] &lt;- calculate_boot_mean(
+    data = df$cost, n = n_sample, replacement = TRUE)
+}
+```
+
+✓ Pre-allocate a vector that fits all values to avoid re-sizing/re-allocating memory 
+
+&lt;!-- But subject to mispecification of vector size --&gt;
+
+---
+
+# Functional programming
+
+- A functional is a function that takes a function as an input, applies the function iteratively to each element in a list and returns the results
+- This can be achieved using functions from the `apply()` family&lt;sup&gt;†&lt;/sup&gt;
+- Runs `for` loop internally in C
+
+
+
+```r
+boot_mean &lt;- lapply(c(1:500), function(i){
+  calculate_boot_mean(data = df$cost, n = n_sample, replacement = TRUE)
+})
+```
+
+
+.footnote[
+[†] Read more about the `apply()` family of functions in [Carlo Fanara | Datacamp tutorial on the R Apply Family](https://www.datacamp.com/community/tutorials/r-tutorial-apply-family). Functional programming can also be implemented using the `map()` family of functions in [`purrr`](https://purrr.tidyverse.org/). More details in [Garrett Grolemund &amp; Hadley Wickham | R for Data Science - Chapter 21 Iteration](https://r4ds.had.co.nz/iteration.html)
+]
+
+--
+
+✓ No need to pre-define vector for storing results
+
+✓ Variables in working environment unaffected
+
+✓ Makes parallelisation easy 
+
+
+
+---
+
+__? Is it faster?__
+
+--
+
+
+```r
+boot_mean &lt;- numeric(500) 
+
+for(i in c(1:500)){
+  boot_mean[i] &lt;- calculate_boot_mean(
+    data = df$cost, n = n_sample, replacement = TRUE)
+}
+```
+
+Median time taken = 10.74ms
+
+
+
+```r
+boot_mean &lt;- lapply(c(1:500), function(i){
+  calculate_boot_mean(data = df$cost, n = n_sample, replacement = TRUE)
+})
+```
+
+Median time taken = 9.77ms
+
+--
+
+___Sometimes___ 
+
+
+---
+
+# Vectorisation  
+
+- Many operations in R are vectorised 
+- Instead of working on each element of the vector individually (as in the case of loops), it works on the entire vector. 
+
+
+```r
+vector1 &lt;- c(1:4); vector2 &lt;- c(6:9)
+
+## Element-wise computation
+sum &lt;- numeric(length(vector1))
+for(i in seq_along(vector1)) {
+  sum[i] &lt;- vector1[i] + vector2[i]
+}
+
+## Vectorised computation 
+vector1 + vector2
+```
+
+
+.footnote[
+1. [Hadley Wickham | Advanced R - Chapter 24.5 Vectorise](https://adv-r.hadley.nz/perf-improve.html#vectorise)
+2. [Patrick Burns | The R Inferno - Chapter 3 Failing to Vectorize](http://www.burns-stat.com/pages/Tutor/R_inferno.pdf)
+]
+
+---
+
+Suppose we want to test in our dummy cost dataset if the cost of treatment is more than £50. 
+
+
+```r
+## Element-wise computation
+lapply(seq_along(df$cost), function(i){df$cost[i] &gt; 50})
+```
+Median time taken = 144.24µs
+
+
+```r
+## Vectorised computation 
+df$cost &gt; 50
+```
+Median time taken = 1.89µs
+
+---
+
+# Parallelisation
+
+- Running several processes simultaneously on multiple processors/cores of the computer
+- Many different packages to achieve this. Some examples:
+  + [parallel](https://stat.ethz.ch/R-manual/R-devel/library/parallel/doc/parallel.pdf)::mclapply()
+  + [future](https://cran.r-project.org/web/packages/future/vignettes/future-1-overview.html)
+      + [furrr](https://davisvaughan.github.io/furrr/)::future_map()
+  + [foreach](https://cran.r-project.org/web/packages/foreach/vignettes/foreach.html) &amp; [doParallel](https://cran.r-project.org/web/packages/doParallel/vignettes/gettingstartedParallel.pdf)
+  + [snowfall](https://cran.r-project.org/web/packages/snowfall/vignettes/snowfall.pdf)
+
+.footnote[
+Some useful resources on parallelising
+1. [Max Gordan | How-to go parallel in R – basics + tips](http://gforge.se/2015/02/how-to-go-parallel-in-r-basics-tips/)
+2. [CRAN Task View: High-Performance and Parallel Computing with R](https://cran.r-project.org/web/views/HighPerformanceComputing.html)
+]
+
+---
+
+# Parallelising your code
+
+
+
+```r
+boot_mean &lt;- furrr::future_map(c(1:500), function(i){
+  calculate_boot_mean(
+    data = df$cost, n = n_sample, replacement = TRUE)
+})
+```
+
+Median time taken = 25.75ms (previously 9.77ms)
+
+
+```r
+furrr::future_map(seq_along(df$cost), function(i){df$cost[i] &gt; 50})
+```
+
+Median time taken = 13.71ms (previously 0.14424ms)
+
+--
+
+__? Parallelising here is actually _SLOWER_?__
+
+---
+
+### One of the caveats of parallelisation: overhead time&lt;sup&gt;†&lt;/sup&gt; 
+- Each parallel process has its own memory space and data/package needs to be loaded across them all
+- A "start-up" time is required before actual computation occurs
+- Need to weigh up the cost-benefit of using parallelisation
+  + Usually cost &gt; benefit for smaller task
+
+
+.footnote[
+[†] Read more about this in [Imre Gera | Parallelization caveats in R #1: performance issues](https://towardsdatascience.com/parallelization-caveats-in-r-1-the-basics-multiprocessing-and-multithreading-performance-eb584b7e850e)
+]
+
+
+
+---
+
+# Other ways to optimise your code
+
+### Break down the task
+
+#### Make your function do as little as possible
+
+
+```r
+df_cost &lt;- df$cost
+
+boot_mean &lt;- lapply(c(1:500), function(i){
+  calculate_boot_mean(
+    data = df_cost, n = n_sample, replacement = TRUE)
+})
+```
+
+Median time taken = 9.08ms (previously 9.77ms)
+
+- Dimension reduction
+
+---
+
+### Break down the task
+
+#### Do pre-calculations
+
+e.g. Very simple simulation model (finite combination of states) predicting the state patient is in, and performing costs and QALYs calculation in each cycle 
+
+- Pre-calculate costs/QALYs for all possible combinations of states 
+- Apply pre-calculations after simulation 
+
+--
+
+### Using a faster language 
+
+Sometimes R is just slow. But R has interfaces to other faster languages via packages. 
+
+- C++: [Rcpp](http://www.rcpp.org/) [probably the most popular]
+- Python: rPython
+- Java: rJava
+
+---
+
+# Case study with a markov model
+
+### Acknowledgements
+
+&lt;img src="https://avatars0.githubusercontent.com/u/57440859?s=200&amp;v=4" height="150" align="right" /&gt;
+
+Materials used in this case study is based on the work conducted as part of the 2019 R for Health Economics Hackathon. The team behind this work comprise of: 
+
+- Howard Thom, University of Bristol
+- Iryna Schlackow, University of Oxford
+- Mi Jun Keng, University of Oxford
+- Robert Ashton, Imperial College London
+- Sam Abbott, London School of Hygiene and Tropical Medicine
+- Amy Chang, University of Sheffield
+- Han Fu, Imperial College London
+- Houra Haghpanahan, University of Glasgow
+- Zoe Turner, Nottinghamshire Healthcare NHS Foundation Trust
+
+The R code for the original work is accessible from [GitHub](https://github.com/HealthEconomicsHackathon/hermes6).
+
+.footnote[
+For an implementation of this work, see Sam Abbott's package [`SpeedyMarkov`](https://github.com/seabbs/SpeedyMarkov) (presentation on 12th October 0910-0935)
+]
+
+---
+
+Markov model with 10 states (time-homogeneous; all transitions permitted)
+
+
+&lt;img src="image/markov-model.png" height="400" /&gt;
+
+
+- `n.treatments = 2` | no. of treatment arms 
+- `n.samples = 25000` | no. of PSA samples
+- `n.cyles = 100` | number of cycles to run
+
+
+
+
+
+---
+
+Extract of code for Markov model (minimal, non-executable)
+
+```r
+# Loop over the treatment options
+*for(i.treatment in 1:n.treatments){
+  
+  # Extract transition matrix for treatment
+  transition.matrices_tr &lt;- transition.matrices[i.treatment,,,]
+    
+  # Loop over the PSA samples
+* for(i.sample in 1:n.samples){
+    
+    transition.matrices_tr_sample &lt;- transition.matrices_tr[i.sample,,]
+    
+    # Loop over the cycles
+*   for(i.cycle in 2:n.cycles){
+      
+      # Markov update  
+      cohort.vectors[i.treatment, i.sample,i.cycle,]&lt;-
+        cohort.vectors[i.treatment, i.sample,i.cycle-1,] %*%
+        transition.matrices_tr_sample
+    }
+    
+    cohort.vectors_tr_sample &lt;- cohort.vectors[i.treatment,i.sample,,]
+  }
+}
+```
+
+
+---
+
+class: center, middle
+
+&lt;table&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; Tx &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; PSA sample &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; Cycle &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; Median time across 20 iterations &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 16.1s &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+
+---
+
+### `lapply()` over treatments 
+
+
+```r
+# Functional loop over treatment options
+*lapply(c(1:n.treatments), function(i.treatment){
+  
+  transition.matrices_tr &lt;- transition.matrices[i.treatment,,,]
+  ## Dimension reduction 
+  cohort.vectors_tr &lt;- cohort.vectors[i.treatment,,,] 
+  
+  for(i.sample in 1:n.samples){ 
+    
+    transition.matrices_tr_sample &lt;- transition.matrices_tr[i.sample,,]
+    ## Dimension reduction 
+    cohort.vectors_tr_sample &lt;- cohort.vectors_tr[i.sample,,] 
+    
+    for(i.cycle in 2:n.cycles){ 
+      
+      cohort.vectors_tr_sample[i.cycle,] &lt;- cohort.vectors_tr_sample[i.cycle-1,] %*% transition.matrices_tr_sample
+    }
+  }
+})
+```
+
+
+---
+class: center, middle
+
+&lt;table&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; Tx &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; PSA sample &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; Cycle &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; Median time across 20 iterations &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 16.1s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 11.3s &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+
+
+---
+
+### `lapply()` over PSA samples
+
+```r
+for(i.treatment in c(1:n.treatments)){ 
+  
+  transition.matrices_tr &lt;- transition.matrices[i.treatment,,,]
+  cohort.vectors_tr &lt;- cohort.vectors[i.treatment,,,]
+  
+  # Functional loop over PSA samples
+* lapply(c(1:n.samples), function(i.sample){
+    
+    transition.matrices_tr_sample &lt;- transition.matrices_tr[i.sample,,]
+    cohort.vectors_tr_sample &lt;- cohort.vectors_tr[i.sample,,]
+
+    for(i.cycle in 2:n.cycles){ 
+      
+      cohort.vectors_tr_sample[i.cycle,] &lt;-
+        cohort.vectors_tr_sample[i.cycle-1,] %*%
+        transition.matrices_tr_sample
+    }
+  }) 
+}
+```
+
+
+---
+class: center, middle
+
+&lt;table&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; Tx &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; PSA sample &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; Cycle &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; Median time across 20 iterations &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 16.1s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 11.3s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 14.3s &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+---
+
+### `mclapply()` over PSA samples
+
+
+```r
+for(i.treatment in c(1:n.treatments)){ 
+
+  transition.matrices_tr &lt;- transition.matrices[i.treatment,,,]
+  cohort.vectors_tr &lt;- cohort.vectors[i.treatment,,,]
+
+  # Parallelised over PSA samples
+* furrr::future_map(c(1:n.samples), function(i.sample){
+  
+    transition.matrices_tr_sample &lt;- transition.matrices_tr[i.sample,,]
+    cohort.vectors_tr_sample &lt;- cohort.vectors_tr[i.sample,,]
+
+    for(i.cycle in 2:n.cycles){ 
+      
+      cohort.vectors_tr_sample[i.cycle,] &lt;- cohort.vectors_tr_sample[i.cycle-1,] %*% transition.matrices_tr_sample
+    }
+  }) 
+}
+```
+
+---
+class: center, middle
+
+
+&lt;table&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; Tx &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; PSA sample &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; Cycle &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; Median time across 20 iterations &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 16.1s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 11.3s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 14.3s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: red !important;" &gt;parallel&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 14.8s &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+---
+
+### `lapply()` over treatments &amp; vectorised operation over samples
+
+
+```r
+# Functional loop over the treatment options
+*lapply(c(1:n.treatments), function(i.treatment){
+  
+  transition.matrices_tr &lt;- transition.matrices[i.treatment,,,]
+  cohort.vectors_tr &lt;- cohort.vectors[i.treatment,,,]
+
+  for(i.cycle in 2:n.cycles){
+    
+    ## Reformulated such that vectorised operation over PSA samples
+*   for(i.state in 1:n.states){
+*      cohort.vectors_tr[ ,i.cycle,i.state]&lt;-
+*        rowSums(cohort.vectors_tr[ ,i.cycle-1, ] *
+*                  transition.matrices_tr[,,i.state])
+*   }
+  }
+})
+```
+
+---
+
+class: center, middle
+
+
+&lt;table&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; Tx &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; PSA sample &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; Cycle &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; Median time across 20 iterations &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 16.06s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 11.28s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 14.27s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: red !important;" &gt;parallel&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 14.79s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: red !important;" &gt;vectorised&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 9.21s &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+---
+
+### `lapply()` over treatments &amp; `rcpp_loop()` over cycles
+
+
+```r
+# Functional loop over the treatment options
+*lapply(c(1:n.treatments), function(i.treatment){
+  
+  transition.matrices_tr &lt;- transition.matrices[i.treatment,,,]
+  cohort.vectors_tr &lt;- cohort.vectors[i.treatment,,,]
+  
+  for(i.sample in 1:n.samples){ 
+    
+    transition.matrices_tr_sample &lt;- transition.matrices_tr[i.sample,,]
+    
+    cohort.vectors_tr_sample &lt;- cohort.vectors_tr[i.sample,,]
+    
+    # Loop over the cycles using Rcpp
+*   cohort.vectors_tr_sample &lt;-
+*     rcpp_loop(mat_in = cohort.vectors_tr_sample,
+*               transition = transition.matrices_tr_sample,
+*               n = n.cycles)
+* }
+})
+```
+
+---
+
+class: center, middle
+
+
+&lt;table&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; Tx &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; PSA sample &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; Cycle &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; Median time across 20 iterations &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 16.06s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 11.28s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 14.27s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: red !important;" &gt;parallel&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 14.79s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: red !important;" &gt;vectorised&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 9.21s &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: blue !important;" &gt;lapply&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: black !important;" &gt;for loop&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; &lt;span style="     color: red !important;" &gt;rcpp&lt;/span&gt; &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 5.85s &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+---
+
+class: center
+
+### How to optimise? 
+
+Functionals | Vectorising | Parallelising etc.
+
+--
+
+## What should you optimise? 
+
+Always aim for readability | Profile your code to find bottlenecks&lt;sup&gt;†&lt;/sup&gt;
+
+.footnote[
+
+[†] One way to easily profile your code is with [`profvis`](https://rstudio.github.io/profvis/). More about code profiling in [Hadley Wickham | Advanced R - Chapter 23 Measuring performance](https://adv-r.hadley.nz/perf-measure.html)
+
+]
+
+--
+
+# Should you even optimise at all? 
+
+First make it work correctly. Then, perhaps.
+
+--
+
+&lt;blockquote&gt;&lt;i&gt;
+We should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil. — Donald Knuth 
+&lt;/i&gt;&lt;/blockquote&gt;
+
+
+
+
+---
+
+
+# References
+
+
+&lt;p&gt;&lt;cite&gt;Gillespie, C. and R. Lovelace
+(2017).
+&lt;em&gt;Efficient R Programming : A Practical Guide to Smarter Programming&lt;/em&gt;.
+Eng.
+First.
+Sebastopol, CA: O'Reilly.
+ISBN: 978-1-4919-5078-4.&lt;/cite&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;cite&gt;Hadley Wickham and Garrett Grolemund
+(2016).
+&lt;em&gt;R for Data Science&lt;/em&gt;.
+Eng.
+1st.
+O'Reilly Media, Inc..&lt;/cite&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;cite&gt;Wickham, H.
+(2019).
+&lt;em&gt;Advanced R&lt;/em&gt;.
+2nd edition..
+Chapman &amp;amp; Hall/CRC the r Series.
+Boca Raton.
+ISBN: 978-1-351-20129-2.&lt;/cite&gt;&lt;/p&gt;
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>
