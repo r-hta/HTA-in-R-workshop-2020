@@ -1,0 +1,280 @@
+---
+title: "Cost-effectiveness of treatment for Hepatitis C Virus"
+subtitle: "Infectious disease modelling for HTA in R"
+author: "Josephine Walker\nhttps://github.com/jogwalker/InfDis_RforHTA"
+date: "09/10/2020"
+output: beamer_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Background
+
+Hepatitis C virus (HCV) is a highly infectious blood-borne virus. It is widespread in people who inject drugs (PWID), and in some settings is also prevalent in the general population due to contact with blood products through medical, dental or cosmetic treatments. 
+
+In 2016, WHO set a target of eliminating HCV by 2030.
+
+![HCV prevalence in PWID (Grebeley et al 2019 Addiction)](~/git/InfDis_RforHTA/hcvprevpwid.jpg){#id .class width=50% height=50%}
+
+## Approach
+
+Highly effective drugs are now available to treat HCV, however, access has been limited in many low and middle-income countries. 
+
+My job involves modeling the impact and cost-effectiveness of HCV treatment in a variety of settings. 
+
+For HCV, a large impact of treatment particularly in PWID is on averted *infections*, which must be estimated with a transmission model. 
+
+Here we'll use an SIR-type transmission model to do a cost-effectiveness analysis of HCV treatment in PWID.
+
+
+## Model structure
+
+![](~/git/InfDis_RforHTA/diagram.pdf)   
+
+## Key Model Assumptions
+
+- Transmission only occurs in PWID
+- PWID leave injecting at a certain rate
+- Those infected with HCV develop cirrhosis over time
+- Risk of death is higher for PWID and those with cirrhosis, doesn't change after treatment, but progression to cirrhosis is prevented after treatment
+- Entry into the susceptible PWID group to keep a stable population size
+
+
+## Research Question
+
+What is the cost in USD per QALY gained of treating people who inject drugs for Hepatitis C, compared to no treatment in this population? Is it more cost-effective to exclude active PWID from treatment, treat PWID at the same rate, or at a higher rate, compared to the treatment rate for ex-PWID? We will look at a time horizon of 100 years or 5 years, with an annual discount rate of 3% for both costs and outcomes.
+ 
+
+## Cost-effectiveness analysis
+
+- Assume cost of treatment is $375
+- Assume cost of care for cirrhosis is $200/year
+- Assume QALY weights: 
+  - Ex-PWID: Uninfected 0.94; Infected 0.77; Cirrhotic 0.55; Recovered 0.82; Recovered cirrhosis 0.61
+  - PWID: As-ExPWID*(0.85/0.94)
+
+
+## Set initial conditions
+
+```{r echo = TRUE,eval=FALSE}
+
+#Load libraries
+library(ggplot2)
+library(deSolve) # differential equation solver
+library(tidyverse)
+
+# Initial conditions
+
+initial_values=c(SP=6000,IP=4000,TIP=0,CP=0,TCP=0,RP=0
+                 ,RCP=0,SX=0,IX=0,TIX=0,CX=0,TCX=0,RX=0,
+                 RCX=0,D=0) # assume 40% prevalence in PWID
+
+# Time points
+
+time=seq(from=1,to=100,by=1)
+
+```
+
+## Define model equations as a function
+
+![](~/git/InfDis_RforHTA/diagram.pdf)
+
+## Define model equations as a function (1/3)
+
+```{r echo = TRUE,eval=FALSE}
+# SIR model function 
+
+sir_model <- function(time,state,parameters){
+  with(as.list(c(state,parameters)),{
+    
+    # force of infection assuming only transmission in PWID
+    NP=SP+IP+TIP+CP+TCP+RP+RCP
+    lambda=beta*((IP+TIP+CP+TCP)/NP) 
+    
+    B = muP*NP + muX*(SX+IX+CX+TIX+TCX+RX+RCX) # births
+    
+    
+```
+
+## Define model equations as a function (2/3)
+
+```{r echo=TRUE,eval=FALSE}
+dSP= B -lambda*SP - tau*SP - muP*SP 
+# birth (non HCV deaths), - infection, cessation, death
+dIP= lambda*SP + (1-svr)*tl*TIP -treat*treatP*IP  - zeta*IP - muP*IP - tau*IP
+# +infection, failed treatment, - treatment, -progression, -death, -cessation
+dTIP= treat*treatP*IP - tl*TIP - muP*TIP # treatment, - leaving treatment, - death
+dCP= -(treat*treatP+muC+muP+tau)*CP + zeta*IP + (1-svr)*tl*TCP
+# +progression, failed treatment, -death, - treatment, - cessation
+dTCP= treat*treatP*CP - tl*TCP - muC*TCP - muP*TCP
+dRP= svr*tl*TIP - muP*RP - tau*RP# recovered, death, cessation
+dRCP = svr*tl*TCP - muP*RCP -muC*RCP - tau*RCP
+
+```
+
+## Define model equations as a function (3/3)
+
+```{r echo=TRUE,eval=FALSE}
+    
+    dSX= tau*SP - muX*SX
+    dIX= tau*IP - muX*IX - treat*IX + (1-svr)*tl*TIX
+    dTIX= - muX*TIX + treat*IX - tl*TIX
+    dCX= tau*CP - muX*CX - muC*CX - treat*CX 
+                                  + (1-svr)*tl*TCX
+    dTCX= - muX*TCX - muC*TCX + treat*CX - tl*TCX
+    dRX= tau*RP - muX*RX + svr*tl*TIX
+    dRCX = tau*RCP - muX*RCX - muC*RCX + svr*tl*TCX
+
+    dD= muC*(CP+RCP+TCP+CX+TCX+RCX) #don't track non-HCV deaths
+      
+    return(list(c(dSP,dIP,dTIP,dCP,dTCP,dRP,dRCP,dSX,
+                  dIX,dTIX,dCX,dTCX,dRX,dRCX,dD)))
+  }
+  )
+}
+
+
+```
+
+
+## What are those parameters?
+
+### No treatment scenario 
+
+```{r echo=TRUE,eval=FALSE}
+# Baseline parameters
+parameters=c(
+  treat=0, # baseline rate of treatment 
+  treatP=1,# scaling factor for treating PWID
+  beta=0.3, # transmission rate per contact per year 
+  tl=1/0.25, # rate of leaving treatment 
+  svr=0.95, # cure rate
+  muC=1/20, # death rate with cirrhosis
+  muX=1/70, # death rate for exPWID
+  muP=1/40, # death rate for PWID
+  zeta=1/20, # progression to cirrhosis
+  tau=1/20 # average injecting duration of 20 years
+)
+```
+
+## Model scenarios
+
+Change parameters to model different scenarios:
+
+- No treatment: treat=0
+- Treat all equally: treat=0.2, treatP=1
+- Treat PWID at higher rate: treat=0.2, treatP=3 
+- Treat Ex-PWID only: treat=0.2, treatP=0
+
+Note: doing it this way, the total treatment numbers will be different in each scenario
+
+## Solving the differential equations
+
+```{r echo=TRUE,eval=FALSE}
+#Solving the differential equations
+output<-as.data.frame(ode(y=initial_values,
+                          func = sir_model,
+                          parms=parameters,
+                          times = time))
+
+output_treat <- as.data.frame(ode(y=initial_values,
+                                  func = sir_model,
+                                  parms=parameters_treat,
+                                  times = time))
+
+```
+
+## Model results
+Number in each compartment over time
+![](~/git/InfDis_RforHTA/plot1.pdf)
+
+## Assign costs and QoL weights to each compartment (1/2)
+
+```{r echo=TRUE,eval=FALSE}
+treatcost <- 375
+cirrhosiscost <- 200
+
+QoL <- c(0.94,0.77,0.77,0.55,0.55,0.82,0.61)
+# Ex-PWID: Uninfected 0.94; Infected 0.77; Cirrhotic 0.55; 
+  #Recovered 0.82; Recovered cirrhosis 0.61 
+# treatment as infected
+QP <- (0.85/0.94)
+
+outputEE <- outputAll
+```
+
+## Assign costs and QoL weights to each compartment (2/2)
+
+```{r echo=TRUE,eval=FALSE}
+# costs
+outputEE$treatcost <- (outputEE$TIP + outputEE$TIX 
+                       + outputEE$TCP 
+                       + outputEE$TCX)*treatcost
+
+# outcomes
+outputEE$QALY.X <- rowSums(
+  t(apply(outputEE[,3:9],1,function(x){x*QoL})))
+
+```
+
+## Add discounting
+
+```{r echo=TRUE,eval=FALSE}
+## discount
+discounting <- function(years,value,rate,baseyear) { 
+    time <- years - baseyear 
+    out <- value/(1+rate)^time
+    return(out)
+}
+
+outputEE$costD <- discounting(outputEE$time,
+                              outputEE$tot.cost,0.03,1)
+outputEE$QALYD <- discounting(outputEE$time,
+                              outputEE$QALYs,0.03,1)
+
+```
+
+
+## Calculate ICER
+
+```{r echo=TRUE,eval=FALSE}
+## calculate mean ICER
+pop = 10000
+TotalCE <- outputEE %>% group_by(Scenario) %>%
+  summarise(costD=sum(costD)/pop,DALYD=sum(DALYD)/pop,
+            QALYD=sum(QALYD)/pop) %>% arrange(QALYD) 
+TotalCE$diffcost <- c(NA,diff(TotalCE$costD))
+TotalCE$diffQALY <-  c(NA,diff(TotalCE$QALYD))
+TotalCE$ICER <- TotalCE$diffcost / TotalCE$diffQALY
+
+```
+
+## Results
+
+![](~/git/InfDis_RforHTA/ICERtable.png)
+Each row is incremental to the row above 
+
+## Discussion
+
+- Important to use a model which accounts for infectious disease transmission (new cases or re-infection) when evaluating costs and impacts of interventions for infectious disease with ongoing transmission
+- In this simplified case, treating the people who are involved in disease transmission makes treatment cost saving
+- With a chronic disease like HCV, costs and outcomes are seen over a long time period
+
+## Next steps
+
+- In a model like this we'd normally run many iterations to allow for uncertainty in parameters, and fit uncertain model parameters to observed data
+- Other questions could be explored by tweaking this model, such as 
+  - Allowing for reduced transmission in Ex-PWID, 
+  - Prioritizing treatment to patients with or without cirrhosis, 
+  - Different treatment costs for different groups
+
+
+## Further reading
+
+- Pakistan https://www.thelancet.com/journals/langlo/article/PIIS2214-109X(20)30003-6/fulltext (done in Matlab)
+- Cambodia https://onlinelibrary.wiley.com/doi/full/10.1111/liv.14550 (Markov model)
+- Map source https://onlinelibrary.wiley.com/doi/epdf/10.1111/add.14393 
+- QALY weight source https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4914770/ 
+
